@@ -35,7 +35,10 @@ start {
  `rm -rf build`
 
 ## run the program
-cd build
-cmake ..
-make 
-./kat_compiler ../tests/test.kat
+`cd build`
+
+`cmake ..`
+
+`make `
+
+`/kat_compiler ../tests/test.kat`
