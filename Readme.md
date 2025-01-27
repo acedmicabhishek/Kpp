@@ -19,7 +19,7 @@ start {
 
     out << "The result is: " << result ;
 
-    if result > 10 {
+    if (result > 10) {
         out << "The result is greater than 10." ;
     } else {
         out << "The result is 10 or less." ;
