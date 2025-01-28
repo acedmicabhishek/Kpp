@@ -23,7 +23,7 @@ private:
 
     const std::unordered_set<std::string> keywords = {
         "start", "close", "intbox", "floatbox", "stringbox", "charbox",
-        "boolbox", "out", "in", "if", "else", "true", "false", "endl"
+        "boolbox", "out", "in", "if", "else", "true", "false", "endl", "while"
     };
 
     const std::unordered_set<std::string> operators = {
