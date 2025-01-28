@@ -5,14 +5,35 @@
 #include <iostream>
 #include <stdexcept>
 #include <optional>
+#include <variant>
 #include "tokenstore.hpp"
+
+enum class StatementType {
+    VariableDeclaration,
+    Output,
+    Input,
+    IfStatement,
+    WhileLoop,
+    Expression,
+    Invalid
+};
+
+struct ParsedStatement {
+    StatementType type;
+    std::vector<Token> tokens;
+    std::vector<ParsedStatement> children;
+};
+
+struct NodeProg {
+    std::vector<ParsedStatement> stmts;
+};
 
 class Parser {
 private:
     std::vector<Token> tokens;
     size_t current;
+    std::vector<ParsedStatement> parsedStatements;
 
-    // to get the current token
     Token& peek() {
         if (current < tokens.size())
             return tokens[current];
@@ -41,96 +62,166 @@ private:
             throw std::runtime_error("Expected '{' after 'start' at line " + std::to_string(peek().line));
 
         while (!match("keyword", "close")) {
-            parseStatement();
+            parsedStatements.push_back(parseStatement());
         }
 
         if (!match("symbol", "}"))
             throw std::runtime_error("Expected '}' after 'close' at line " + std::to_string(peek().line));
     }
 
-    void parseStatement() {
+    ParsedStatement parseStatement() {
         if (match("keyword", "intbox") || match("keyword", "floatbox") ||
             match("keyword", "stringbox") || match("keyword", "charbox") ||
             match("keyword", "boolbox")) {
-            parseVariableDeclaration();
+            return parseVariableDeclaration();
         } else if (match("keyword", "out")) {
-            parseOutput();
+            return parseOutput();
         } else if (match("keyword", "in")) {
-            parseInput();
+            return parseInput();
         } else if (match("keyword", "if")) {
-            parseIfStatement();
+            return parseIfStatement();
+        } else if (match("keyword", "while")) {
+            return parseWhileLoop();
         } else {
             throw std::runtime_error("Unexpected statement at line " + std::to_string(peek().line));
         }
     }
 
-    void parseVariableDeclaration() {
+    ParsedStatement parseVariableDeclaration() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::VariableDeclaration;
+        stmt.tokens.push_back(tokens[current - 1]);
+
         if (!match("identifier"))
             throw std::runtime_error("Expected variable name at line " + std::to_string(peek().line));
+        stmt.tokens.push_back(tokens[current - 1]);
 
         if (match("operator", "=")) {
-            parseExpression();
+            stmt.tokens.push_back(tokens[current - 1]);
+            auto expression = parseExpression();
+            stmt.tokens.insert(stmt.tokens.end(), expression.tokens.begin(), expression.tokens.end());
         }
 
         if (!match("symbol", ";"))
             throw std::runtime_error("Expected ';' at the end of variable declaration at line " + std::to_string(peek().line));
+
+        return stmt;
     }
 
-    void parseOutput() {
-        // Handle '<<' operator after 'out'
+    ParsedStatement parseOutput() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::Output;
+
         if (match("operator", "<") && match("operator", "<")) {
-            parseExpression();
+            stmt.tokens.push_back(tokens[current - 2]);
+            auto expression = parseExpression();
+            stmt.tokens.insert(stmt.tokens.end(), expression.tokens.begin(), expression.tokens.end());
         } else {
             throw std::runtime_error("Expected '<<' after 'out' at line " + std::to_string(peek().line));
         }
 
         if (!match("symbol", ";"))
             throw std::runtime_error("Expected ';' at the end of output statement at line " + std::to_string(peek().line));
+
+        return stmt;
     }
 
-    void parseInput() {
+    ParsedStatement parseInput() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::Input;
+
         if (!match("operator", ">>"))
             throw std::runtime_error("Expected '>>' after 'in' at line " + std::to_string(peek().line));
+        stmt.tokens.push_back(tokens[current - 1]); // Add the '>>' operator token
 
         if (!match("identifier"))
             throw std::runtime_error("Expected variable name after '>>' at line " + std::to_string(peek().line));
+        stmt.tokens.push_back(tokens[current - 1]); // Add the identifier token
 
         if (!match("symbol", ";"))
             throw std::runtime_error("Expected ';' at the end of input statement at line " + std::to_string(peek().line));
+
+        return stmt;
     }
 
-    void parseIfStatement() {
-        parseExpression();
+    ParsedStatement parseIfStatement() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::IfStatement;
+
+        if (!match("symbol", "("))
+            throw std::runtime_error("Expected '(' after 'if' at line " + std::to_string(peek().line));
+        
+        auto condition = parseExpression(); // Add the condition tokens
+        stmt.tokens.insert(stmt.tokens.end(), condition.tokens.begin(), condition.tokens.end());
+
+        if (!match("symbol", ")"))
+            throw std::runtime_error("Expected ')' after condition at line " + std::to_string(peek().line));
 
         if (!match("symbol", "{"))
             throw std::runtime_error("Expected '{' after 'if' condition at line " + std::to_string(peek().line));
 
         while (!match("symbol", "}")) {
-            parseStatement();
+            stmt.children.push_back(parseStatement());
         }
 
         if (match("keyword", "else")) {
             if (!match("symbol", "{"))
                 throw std::runtime_error("Expected '{' after 'else' at line " + std::to_string(peek().line));
 
+            ParsedStatement elseStmt;
+            elseStmt.type = StatementType::IfStatement;
             while (!match("symbol", "}")) {
-                parseStatement();
+                elseStmt.children.push_back(parseStatement());
             }
+            stmt.children.push_back(elseStmt);
         }
+
+        return stmt;
     }
 
-    void parseExpression() {
-        // Basic expression parsing (identifier, literals, operators)
+    ParsedStatement parseWhileLoop() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::WhileLoop;
+
+        if (!match("symbol", "("))
+            throw std::runtime_error("Expected '(' after 'while' at line " + std::to_string(peek().line));
+
+        auto condition = parseExpression();
+        stmt.tokens.insert(stmt.tokens.end(), condition.tokens.begin(), condition.tokens.end());
+
+        if (!match("symbol", ")"))
+            throw std::runtime_error("Expected ')' after condition at line " + std::to_string(peek().line));
+
+        if (!match("symbol", "{"))
+            throw std::runtime_error("Expected '{' after 'while' condition at line " + std::to_string(peek().line));
+
+        while (!match("symbol", "}")) {
+            stmt.children.push_back(parseStatement());
+        }
+
+        return stmt;
+    }
+
+    ParsedStatement parseExpression() {
+        ParsedStatement stmt;
+        stmt.type = StatementType::Expression;
+
         if (match("identifier") || match("integer_literal") || match("float_literal") ||
-            match("string_literal") || match("char_literal")) {
+            match("string_literal") || match("char_literal") || match("keyword", "true") || match("keyword", "false") || match("keyword", "endl")) {
+            stmt.tokens.push_back(tokens[current - 1]);
 
             while (match("operator")) {
-                if (!match("identifier") && !match("integer_literal") && !match("float_literal"))
+                stmt.tokens.push_back(tokens[current - 1]);
+                if (!match("identifier") && !match("integer_literal") && !match("float_literal") &&
+                    !match("keyword", "true") && !match("keyword", "false") && !match("keyword", "endl"))
                     throw std::runtime_error("Expected operand after operator at line " + std::to_string(peek().line));
+                stmt.tokens.push_back(tokens[current - 1]);
             }
         } else {
             throw std::runtime_error("Invalid expression at line " + std::to_string(peek().line));
         }
+
+        return stmt;
     }
 
 public:
@@ -143,5 +234,15 @@ public:
         } catch (const std::runtime_error& e) {
             std::cerr << "Parsing error: " << e.what() << "\n";
         }
+    }
+
+    const std::vector<ParsedStatement>& getParsedStatements() const {
+        return parsedStatements;
+    }
+
+    NodeProg getParsedProgram() const {
+        NodeProg prog;
+        prog.stmts = parsedStatements;
+        return prog;
     }
 };
